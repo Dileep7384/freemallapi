@@ -206,17 +206,14 @@ export function initDb(
   if (process.env.NODE_ENV !== 'development') {
     runMigrationsSync(db, 'up');
   } else {
-    // In dev, verify the DB has been initialised. If not, give a clear error.
+    // A fresh development database needs its initial schema before the server
+    // can start. Existing development databases keep the explicit migration
+    // workflow so pending migrations are not applied unexpectedly.
     const ready = db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'"
     ).get();
     if (!ready) {
-      console.error(
-        '\n  [dev] Database not initialised. Run:\n\n' +
-        '    npm run db:migration:up\n\n' +
-        '  Then restart the server.\n'
-      );
-      process.exit(1);
+      runMigrationsSync(db, 'up');
     }
   }
 

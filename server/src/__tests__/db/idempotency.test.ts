@@ -1,5 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, describe, it, expect } from 'vitest';
 import { initDb } from '../../db/index.js';
+
+let tempDir: string | undefined;
+let openDb: ReturnType<typeof initDb> | undefined;
+
+afterEach(() => {
+  openDb?.close();
+  openDb = undefined;
+  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  tempDir = undefined;
+});
 
 /**
  * All migrations must be idempotent: running initDb twice on the same
@@ -9,9 +22,11 @@ describe('Migration idempotency', () => {
   it('initDb on a fresh in-memory DB then re-run produces identical row counts', () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     // Use a single shared file so both inits hit the same DB.
-    const tmpPath = `/tmp/freeapi-idempotency-${Date.now()}.db`;
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'freellmapi-idempotency-'));
+    const tmpPath = path.join(tempDir, 'freeapi.db');
 
     const db1 = initDb(tmpPath);
+    openDb = db1;
     const before = {
       models: (db1.prepare('SELECT COUNT(*) AS c FROM models').get() as { c: number }).c,
       fallback: (db1.prepare('SELECT COUNT(*) AS c FROM fallback_config').get() as { c: number }).c,
@@ -24,9 +39,11 @@ describe('Migration idempotency', () => {
       `).get() as { c: number }).c,
     };
     db1.close();
+    openDb = undefined;
 
     // Re-init the same DB file — V1..V9 should all no-op idempotently.
     const db2 = initDb(tmpPath);
+    openDb = db2;
     const after = {
       models: (db2.prepare('SELECT COUNT(*) AS c FROM models').get() as { c: number }).c,
       fallback: (db2.prepare('SELECT COUNT(*) AS c FROM fallback_config').get() as { c: number }).c,
@@ -39,6 +56,7 @@ describe('Migration idempotency', () => {
       `).get() as { c: number }).c,
     };
     db2.close();
+    openDb = undefined;
 
     expect(after).toEqual(before);
     expect(after.orphanFallbacks).toBe(0);
